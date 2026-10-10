@@ -258,57 +258,52 @@ function ISLRecognizerApp() {
     }
   };
 
+  // Helper to acquire camera stream with fallback constraints
+  const getCameraStream = async () => {
+    try {
+      // 1. Try ideal resolution without facingMode (prevents Windows driver timeout)
+      return await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 480 } }
+      });
+    } catch (e1) {
+      console.warn('Ideal video constraint failed, attempting basic fallback:', e1);
+      // 2. Fallback to default video track
+      return await navigator.mediaDevices.getUserMedia({ video: true });
+    }
+  };
+
   // Start webcam stream
   const startCamera = async () => {
     setErrorMessage('');
     frameCounterRef.current = 0;
     setFrameCount(0);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-          facingMode: 'user'
-        }
-      });
+      const stream = await getCameraStream();
 
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-
-        // Try using MediaPipe Camera utility if available, else requestAnimationFrame
-        if (window.Camera && holisticRef.current) {
-          const camera = new window.Camera(videoRef.current, {
-            onFrame: async () => {
-              if (videoRef.current && holisticRef.current && !isProcessingRef.current) {
-                isProcessingRef.current = true;
-                try {
-                  await holisticRef.current.send({ image: videoRef.current });
-                } catch (err) {
-                  console.error('Camera onFrame error:', err);
-                } finally {
-                  isProcessingRef.current = false;
-                }
-              }
-            },
-            width: 640,
-            height: 480
-          });
-          camera.start();
-          cameraUtilRef.current = camera;
-        } else {
-          videoRef.current.onloadedmetadata = () => {
-            videoRef.current.play();
-            processFrame();
-          };
-        }
+        videoRef.current.onloadedmetadata = async () => {
+          try {
+            await videoRef.current.play();
+          } catch (e) {
+            console.warn('Video play deferred:', e);
+          }
+          processFrame();
+        };
       }
       setIsCameraActive(true);
     } catch (err) {
       console.error('Error accessing webcam:', err);
-      setErrorMessage(
-        'Could not access webcam. Please ensure camera permissions are granted and no other app is using it.'
-      );
+      if (err.name === 'AbortError' || err.name === 'NotReadableError') {
+        setErrorMessage(
+          'Webcam starting timed out or is locked by another application (e.g. Windows Camera App, Zoom, Teams). Please close other camera apps and click Start Camera again.'
+        );
+      } else {
+        setErrorMessage(
+          'Could not access webcam (' + (err.name || 'Error') + '). Please ensure camera permissions are granted.'
+        );
+      }
       setIsCameraActive(false);
     }
   };
